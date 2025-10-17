@@ -1,0 +1,210 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Truesys  WhatsApp API",
+    "version": "1.0.0",
+    "description": "REST API For WhatsApp."
+  },
+  "servers": [
+    { "url": "http://localhost:3000" }
+  ],
+  "tags": [
+    { "name": "Session", "description": "Session management endpoints" },
+    { "name": "Messages", "description": "Message sending endpoints" },
+    { "name": "Chats", "description": "Chat management endpoints" }
+  ],
+  "paths": {
+    "/sessions": {
+      "get": {
+        "tags": ["Session"],
+        "summary": "Get list of all sessions",
+        "responses": {
+          "200": { "description": "List of all sessions with their status." }
+        }
+      }
+    },
+    "/sessions/add": {
+      "post": {
+        "tags": ["Session"],
+        "summary": "Create new session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session": { "type": "string", "example": "mysession1" }
+                },
+                "required": ["session"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Session created or already connected. Returns QR if needed." },
+          "400": { "description": "Missing session parameter." }
+        }
+      }
+    },
+    "/sessions/{sessionid}": {
+      "get": {
+        "tags": ["Session"],
+        "summary": "Get particular session",
+        "parameters": [
+          {
+            "name": "sessionid",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "mysession1",
+            "description": "Session identifier"
+          }
+        ],
+        "responses": {
+          "200": { "description": "Session details." },
+          "404": { "description": "Session not found." }
+        }
+      }
+    },
+    "/sessions/status": {
+      "get": {
+        "tags": ["Session"],
+        "summary": "Get status of all sessions",
+        "responses": {
+          "200": { "description": "List of all sessions with their status." }
+        }
+      }
+    },
+    "/sessions/getqr": {
+      "post": {
+        "tags": ["Session"],
+        "summary": "Get QR code for a session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session": { "type": "string", "example": "mysession1" }
+                },
+                "required": ["session"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "QR code base64 for the session." },
+          "400": { "description": "Missing session parameter." },
+          "404": { "description": "QR not available for this session." }
+        }
+      }
+    },
+    "/messages/sendtext": {
+      "post": {
+        "tags": ["Messages"],
+        "summary": "Send text message",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session": { "type": "string", "example": "mysession1" },
+                  "to": { "type": "string", "example": "1234567890@s.whatsapp.net" },
+                  "message": { "type": "string", "example": "Hello!" }
+                },
+                "required": ["session", "to", "message"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Message sent." },
+          "400": { "description": "Not connected or invalid session." },
+          "500": { "description": "Error sending message." }
+        }
+      }
+    },
+    "/messages/sendimage": {
+      "post": {
+        "tags": ["Messages"],
+        "summary": "Send image message",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session": { "type": "string", "example": "mysession1" },
+                  "to": { "type": "string", "example": "1234567890@s.whatsapp.net" },
+                  "image": { "type": "string", "example": "https://example.com/image.jpg" },
+                  "caption": { "type": "string", "example": "My image" }
+                },
+                "required": ["session", "to", "image"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Image sent." },
+          "400": { "description": "Not connected or invalid session." },
+          "500": { "description": "Error sending image." }
+        }
+      }
+    },
+    "/messages/sendfile": {
+      "post": {
+        "tags": ["Messages"],
+        "summary": "Send file message",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session": { "type": "string", "example": "mysession1" },
+                  "to": { "type": "string", "example": "1234567890@s.whatsapp.net" },
+                  "file": { "type": "string", "example": "https://example.com/file.pdf" },
+                  "mimetype": { "type": "string", "example": "application/pdf" },
+                  "filename": { "type": "string", "example": "file.pdf" }
+                },
+                "required": ["session", "to", "file", "mimetype", "filename"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "File sent." },
+          "400": { "description": "Not connected or invalid session." },
+          "500": { "description": "Error sending file." }
+        }
+      }
+    },
+    "/chats": {
+      "get": {
+        "tags": ["Chats"],
+        "summary": "Get all chats",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "mysession1",
+            "description": "Session identifier"
+          }
+        ],
+        "responses": {
+          "200": { "description": "List of chats." },
+          "400": { "description": "Not connected or invalid session." },
+          "500": { "description": "Error fetching chats." }
+        }
+      }
+    }
+  }
+}
