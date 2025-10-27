@@ -1,4 +1,0 @@
-CREATE TABLE IF NOT EXISTS session_qr (
-  session VARCHAR(255) PRIMARY KEY,
-  qr TEXT
-);

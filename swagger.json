@@ -67,12 +67,53 @@
         }
       }
     },
-    "/sessions/status": {
+    
+    "/sessions/{sessionid}/reset": {
+      "post": {
+        "tags": ["Session"],
+        "summary": "Force reset a session (delete auth and restart)",
+        "parameters": [
+          {
+            "name": "sessionid",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "mysession1",
+            "description": "Session identifier"
+          }
+        ],
+        "responses": {
+          "200": { "description": "Session reset and restart attempted." },
+          "404": { "description": "Session not found." },
+          "500": { "description": "Error resetting session." }
+        }
+      }
+    },
+    "/sessions/{sessionid}/qr": {
       "get": {
         "tags": ["Session"],
-        "summary": "Get status of all sessions",
+        "summary": "Get QR image for a session (PNG)",
+        "parameters": [
+          {
+            "name": "sessionid",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "mysession1",
+            "description": "Session identifier"
+          }
+        ],
         "responses": {
-          "200": { "description": "List of all sessions with their status." }
+          "200": {
+            "description": "PNG image of the QR code.",
+            "content": {
+              "image/png": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "404": { "description": "Session or QR not found." },
+          "500": { "description": "Error generating QR image." }
         }
       }
     },
@@ -186,19 +227,23 @@
       }
     },
     "/chats": {
-      "get": {
+      "post": {
         "tags": ["Chats"],
         "summary": "Get all chats",
-        "parameters": [
-          {
-            "name": "session",
-            "in": "query",
-            "required": true,
-            "schema": { "type": "string" },
-            "example": "mysession1",
-            "description": "Session identifier"
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session": { "type": "string", "example": "mysession1" }
+                },
+                "required": ["session"]
+              }
+            }
           }
-        ],
+        },
         "responses": {
           "200": { "description": "List of chats." },
           "400": { "description": "Not connected or invalid session." },
