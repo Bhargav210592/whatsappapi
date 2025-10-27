@@ -31,3 +31,6 @@ logs
 dist/
 build/
 coverage/
+
+# Authentication info
+auth_info/
