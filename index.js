@@ -31,9 +31,55 @@ async function startSession(sessionId) {
   }
 
   const authDir = path.resolve(process.cwd(), 'auth_info', sessionId);
-  fs.mkdirSync(authDir, { recursive: true });
+  let state, saveCreds;
 
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  // Try to load from local auth files first
+  if (fs.existsSync(authDir)) {
+    logger.info(`Loading session ${sessionId} from local auth files`);
+    ({ state, saveCreds } = await useMultiFileAuthState(authDir));
+  } else {
+    // If local auth not found, try to load from database
+    try {
+      const db = require('./config/database');
+      const sessionData = await db.getSession(sessionId);
+      
+      if (sessionData && sessionData.status === 'connected' && sessionData.auth_data) {
+        logger.info(`Restoring session ${sessionId} from database`);
+        // Create auth directory
+        fs.mkdirSync(authDir, { recursive: true });
+        
+        // Parse the stored auth data
+        const authData = JSON.parse(sessionData.auth_data);
+        
+        // Write auth data to files
+        await fs.promises.writeFile(
+          path.join(authDir, 'creds.json'),
+          JSON.stringify(authData, null, 2)
+        );
+        
+        // Initialize state from written files
+        ({ state, saveCreds } = await useMultiFileAuthState(authDir));
+        logger.info(`Session ${sessionId} restored from database`);
+      } else {
+        // If not found in database either, create new session
+        logger.info(`Creating new session ${sessionId}`);
+        fs.mkdirSync(authDir, { recursive: true });
+        // ensure DB record exists for this new session
+        try {
+          const db = require('./config/database');
+          await db.createSession(sessionId);
+        } catch (e) {
+          logger.warn(`Failed to create DB record for session ${sessionId}: ${e && e.message ? e.message : e}`);
+        }
+        ({ state, saveCreds } = await useMultiFileAuthState(authDir));
+      }
+    } catch (err) {
+      logger.error(`Failed to restore session ${sessionId} from database:`, err);
+      // Fallback to new session
+      fs.mkdirSync(authDir, { recursive: true });
+      ({ state, saveCreds } = await useMultiFileAuthState(authDir));
+    }
+  }
   const { version, isLatest } = await fetchLatestBaileysVersion();
   logger.info(`Starting session ${sessionId} - Baileys v${version.join('.')}, Latest: ${isLatest}`);
 
@@ -58,11 +104,29 @@ async function startSession(sessionId) {
     logger.debug('Failed to attach in-memory store', e && e.message ? e.message : e);
   }
 
-  // Save creds updates
-  sock.ev.on('creds.update', saveCreds);
+  // Save creds updates -> persist creds.json content into auth_data
+  sock.ev.on('creds.update', async (creds) => {
+    await saveCreds();
+    try {
+      const db = require('./config/database');
+      // ensure DB record exists
+      await db.createSession(sessionId);
+      // Only save auth_data on first occurrence. If auth_data already exists, skip further saves.
+      const existingAuth = await db.getAuthState(sessionId);
+      if (existingAuth) {
+        logger.info(`auth_data already present for session ${sessionId}, skipping save`);
+      } else {
+        // Save only creds into auth_data (this matches creds.json)
+        await db.saveAuthState(sessionId, creds);
+        logger.info(`Session ${sessionId} credentials saved to auth_data in database`);
+      }
+    } catch (err) {
+      logger.error(`Failed to save session ${sessionId} credentials in database:`, err && err.message ? err.message : err);
+    }
+  });
 
   // Listen for connection updates (QR, connected, disconnected)
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     const sess = sessions.get(sessionId);
     if (!sess) return;
     // capture QR if provided
@@ -88,6 +152,19 @@ async function startSession(sessionId) {
     if (update.connection === 'open') {
       sess.status = 'connected';
       logger.info(`Session ${sessionId} connected`);
+      
+      // Save session state and creds to database
+      try {
+        const { state } = sess;
+        const db = require('./config/database');
+        await db.updateSessionConnection(sessionId, state.creds, {
+          browser: sock.user?.browser || null,
+          phone: sock.user?.id?.split(':')[0] || null
+        });
+        logger.info(`Session ${sessionId} state saved to database`);
+      } catch (err) {
+        logger.error(`Failed to save session ${sessionId} to database:`, err && err.message ? err.message : err);
+      }
     }
 
     if (update.connection === 'close') {
@@ -181,29 +258,55 @@ module.exports = {
   resetSession,
 };
 
-// Restore sessions found in auth_info directory. Returns array of started session ids.
+// Restore sessions from database (preferred) by writing creds.json into auth_info and starting sessions.
+// Returns array of started session ids.
 async function restoreSessions() {
   const base = path.resolve(process.cwd(), 'auth_info');
   const started = [];
+
   try {
-    if (!fs.existsSync(base)) return started;
-    const entries = fs.readdirSync(base, { withFileTypes: true });
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        const sessionId = e.name;
-        try {
-          await startSession(sessionId);
-          started.push(sessionId);
-        } catch (err) {
-          logger.warn(`Failed to restore session ${sessionId}: ${err && err.message ? err.message : err}`);
+    const db = require('./config/database');
+    const dbSessions = await db.getAllSessions();
+
+    for (const session of dbSessions) {
+      const sessionId = session.id;
+      try {
+        const authDir = path.join(base, sessionId);
+        // Ensure auth dir exists
+        fs.mkdirSync(authDir, { recursive: true });
+
+        // If we have auth_data, write creds.json from it (overwrite so DB is authoritative)
+        if (session.auth_data) {
+          let authObj = session.auth_data;
+          try {
+            if (typeof authObj === 'string') authObj = JSON.parse(authObj);
+          } catch (parseErr) {
+            logger.warn(`Failed to parse auth_data for session ${sessionId}: ${parseErr && parseErr.message ? parseErr.message : parseErr}`);
+            authObj = null;
+          }
+
+          if (authObj) {
+            // Write only the creds object if present, otherwise write authObj as-is
+            const credsToWrite = authObj.creds ? authObj.creds : authObj;
+            await fs.promises.writeFile(path.join(authDir, 'creds.json'), JSON.stringify(credsToWrite, null, 2));
+            logger.info(`Wrote creds.json for session ${sessionId} from database auth_data`);
+          }
         }
+
+        // Start session (startSession will load from local files)
+        await startSession(sessionId);
+        started.push(sessionId);
+      } catch (err) {
+        logger.warn(`Failed to restore database session ${sessionId}: ${err && err.message ? err.message : err}`);
       }
     }
   } catch (err) {
-    logger.warn('Error while restoring sessions:', err && err.message ? err.message : err);
+    logger.warn('Error while restoring database sessions:', err && err.message ? err.message : err);
   }
+
   return started;
 }
 
 // export restoreSessions
 module.exports.restoreSessions = restoreSessions;
+

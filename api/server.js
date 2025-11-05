@@ -7,6 +7,7 @@ const path = require('path');
 const bot = require('../index');
 const QRCode = require('qrcode');
 const swagger = require('../swagger.json');
+const db = require('../config/database');
 
 const app = express();
 app.use(bodyParser.json({ limit: '10mb' }));
@@ -24,9 +25,25 @@ app.post('/sessions/add', async (req, res) => {
   const { session } = req.body || {};
   if (!session) return res.status(400).json({ error: 'Missing session parameter' });
   try {
+    // Create a blank session record in DB (idempotent)
+    await db.createSession(session);
+
+    // Start the in-memory/socket session (this will generate QR and connection events)
     await bot.startSession(session);
+
+    // Read the session row from DB to return authoritative session data
+    const row = await db.getSession(session);
     const meta = bot.getSessionMeta(session);
-    res.json({ message: `Session ${session} created`, session: { id: session, status: meta?.status, hasQR: !!meta?.lastQRCode } });
+
+    res.json({
+      message: `Session ${session} created`,
+      session: {
+        id: session,
+        status: row?.status || meta?.status || 'pending',
+        hasQR: !!(meta?.lastQRCode || row?.qr_code),
+        db: row || null
+      }
+    });
   } catch (e) {
     res.status(500).json({ error: e.message || String(e) });
   }
